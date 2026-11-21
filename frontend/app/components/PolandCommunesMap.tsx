@@ -722,6 +722,7 @@ const PolandCommunesMap = forwardRef<
           const is24Hour = cluster.items.some(
             (item) => item.status.key === "open_24_7",
           );
+          const showRedPin = zoom >= 9 && is24Hour;
           const size =
             zoom >= 9 ? 38 :
             zoom >= 7 ? 46 :
@@ -747,20 +748,32 @@ const PolandCommunesMap = forwardRef<
                 }
               }}
             >
-              <button
-                type="button"
-                aria-label={
-                  isSingle
-                    ? `Pokaż dane defibrylatora: ${cluster.items[0].name}`
-                    : `Powiększ ${cluster.name ?? "grupę"}: ${count} defibrylatorów`
-                }
-                className={`aed-marker ${is24Hour ? "aed-marker--available" : ""}`}
-                style={{ width: size, height: size }}
-              >
-                <span aria-hidden="true">
-                  {isSingle ? "AED" : count}
-                </span>
-              </button>
+              <div className="aed-pin" style={{ width: size, height: size * 0.8 }}>
+                <button
+                  type="button"
+                  aria-label={
+                    isSingle
+                      ? `Pokaż dane defibrylatora: ${cluster.items[0].name}`
+                      : `Powiększ ${cluster.name ?? "grupę"}: ${count} defibrylatorów`
+                  }
+                  className="block h-full w-full border-0 bg-transparent p-0"
+                >
+                  <img
+                    src={showRedPin ? "/pin.svg" : "/pin-navy.svg"}
+                    alt=""
+                    draggable={false}
+                    className="h-full w-full"
+                  />
+                </button>
+                {!isSingle && (
+                  <span
+                    aria-hidden="true"
+                    className="aed-pin__label"
+                  >
+                    {count} AED
+                  </span>
+                )}
+              </div>
             </Marker>
           );
         })}
