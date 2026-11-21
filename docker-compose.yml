@@ -1,0 +1,59 @@
+# Fixed project name -> the same container/volume no matter which checkout
+# (repo root or a git worktree) runs `docker compose`.
+name: aed-map
+
+services:
+  mongodb:
+    image: mongo:8.0
+    container_name: aed-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: aed_map
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: aed-backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: aed_map
+      MONGO_COLLECTION_NAME: aed
+      # Origin of the frontend as opened in the browser
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "8000:8000"
+    volumes:
+      # Scraper output (seed_db.py) persists on the host: backend/data/aed_scraped.json
+      - ./backend/data:/app/data
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Inlined into the browser bundle — must be reachable from the user's browser
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: aed-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+volumes:
+  mongo_data:
