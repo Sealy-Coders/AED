@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   setWorkerUrl,
   type FillLayerSpecification,
@@ -83,6 +90,22 @@ type PolandCommunesMapProps = {
   defibrillatorData?: DefibrillatorData;
 };
 
+type SelectedLocation = {
+  longitude: number;
+  latitude: number;
+  name: string;
+  voivodeship: string;
+};
+
+export type PolandCommunesMapHandle = {
+  flyToLocation: (
+    longitude: number,
+    latitude: number,
+    name: string,
+    voivodeship: string,
+  ) => void;
+};
+
 const RED_COLORS = [
   "#fee2e2",
   "#fecaca",
@@ -132,15 +155,18 @@ if (typeof window !== "undefined") {
   setWorkerUrl("/maplibre-worker");
 }
 
-export default function PolandCommunesMap({
-  defibrillatorData,
-}: PolandCommunesMapProps) {
+const PolandCommunesMap = forwardRef<
+  PolandCommunesMapHandle,
+  PolandCommunesMapProps
+>(function PolandCommunesMap({ defibrillatorData }, ref) {
   const mapRef = useRef<MapRef>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [zoom, setZoom] = useState(5.7);
   const [hoveredArea, setHoveredArea] = useState<HoveredArea | null>(null);
   const [aedItems, setAedItems] = useState<AedItem[]>([]);
   const [selectedAed, setSelectedAed] = useState<AedItem | null>(null);
+  const [selectedLocation, setSelectedLocation] =
+    useState<SelectedLocation | null>(null);
   const [aedLoadError, setAedLoadError] = useState<string | null>(null);
   const aedAbortRef = useRef<AbortController | null>(null);
   const aedRequestKeyRef = useRef("");
@@ -148,6 +174,21 @@ export default function PolandCommunesMap({
     status: "loading",
   });
   const [reloadKey, setReloadKey] = useState(0);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      flyToLocation: (longitude, latitude, name, voivodeship) => {
+        setSelectedLocation({ longitude, latitude, name, voivodeship });
+        mapRef.current?.getMap().flyTo({
+          center: [longitude, latitude],
+          zoom: 10,
+          duration: 1200,
+        });
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     if (defibrillatorData) return;
@@ -474,6 +515,42 @@ export default function PolandCommunesMap({
           />
         </Source>
 
+        {selectedLocation && (
+          <Marker
+            longitude={selectedLocation.longitude}
+            latitude={selectedLocation.latitude}
+            anchor="bottom"
+          >
+            <div
+              aria-label={`Wybrano: ${selectedLocation.name}, województwo ${selectedLocation.voivodeship}`}
+              className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-sky-600 shadow-[0_4px_14px_rgba(2,132,199,0.45)]"
+            >
+              <span className="h-3 w-3 rounded-full bg-white" />
+            </div>
+          </Marker>
+        )}
+
+        {selectedLocation && (
+          <Popup
+            longitude={selectedLocation.longitude}
+            latitude={selectedLocation.latitude}
+            anchor="top"
+            offset={18}
+            closeButton={false}
+            closeOnClick={false}
+            className="commune-popup"
+          >
+            <div className="px-1 py-0.5">
+              <strong className="block text-sm text-slate-900">
+                {selectedLocation.name}
+              </strong>
+              <span className="block text-xs text-slate-600">
+                woj. {selectedLocation.voivodeship}
+              </span>
+            </div>
+          </Popup>
+        )}
+
         {zoom >= 9 &&
           aedItems.map((aed) => (
             <Marker
@@ -665,4 +742,6 @@ export default function PolandCommunesMap({
       </div>
     </div>
   );
-}
+});
+
+export default PolandCommunesMap;
