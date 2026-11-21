@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
 
 from app.models import MetricName
@@ -49,13 +48,16 @@ def enrich_gminy_with_metric(
     Return a FeatureCollection with active_metric, active_value, and intensity_score
     added to each feature's properties.
     """
-    result = deepcopy(geojson)
-    features = result.get("features") or []
+    # Copy properties only — geometries are shared (the gminy file is ~12 MB).
+    features = [
+        {**feature, "properties": dict(feature.get("properties") or {})}
+        for feature in geojson.get("features") or []
+    ]
+    result = {**geojson, "features": features}
 
     values: list[float] = []
     for feature in features:
-        props = feature.setdefault("properties", {}) or {}
-        feature["properties"] = props
+        props = feature["properties"]
         value = compute_metric_value(props, metric)
         values.append(value)
         props["active_metric"] = metric
