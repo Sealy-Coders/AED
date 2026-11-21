@@ -2,44 +2,61 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pymongo.errors import PyMongoError
 
-from app.data_loader import load_aed_items, load_gminy
+from app import db
+from app.config import settings
+from app.data_loader import load_gminy
+from app.mappers import rollup_counts, to_api_aed
 from app.metrics import VALID_METRICS, enrich_gminy_with_metric
-from app.models import AedListResponse, OpenStatus
+from app.models import AedItem, AedListResponse, FrequenciesResponse, OpenStatus
 from app.status import compute_open_status, is_open_now_status
 
-# In-memory cache (loaded at import and refreshed on app startup)
-_gminy: dict[str, Any] = load_gminy()
-_aed_items: list[dict[str, Any]] = load_aed_items()
+logger = logging.getLogger(__name__)
+
+# Gminy geometry is static — loaded once at startup; AED counts come from MongoDB.
+_gminy: dict[str, Any] = {"type": "FeatureCollection", "features": []}
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global _gminy, _aed_items
+    global _gminy
     _gminy = load_gminy()
-    _aed_items = load_aed_items()
+    await db.connect()
     yield
+    await db.close()
 
 
 app = FastAPI(
     title="AED Map API",
     description="Polish AED map and open-data aggregation backend",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(PyMongoError)
+async def mongo_error_handler(_request: Request, exc: PyMongoError) -> JSONResponse:
+    logger.error("MongoDB error: %s", exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database unavailable"},
+    )
 
 
 def _parse_bbox(bbox: str) -> tuple[float, float, float, float]:
@@ -59,20 +76,6 @@ def _parse_bbox(bbox: str) -> tuple[float, float, float, float]:
     return min_lon, min_lat, max_lon, max_lat
 
 
-def _in_bbox(
-    lon: Any,
-    lat: Any,
-    bbox: tuple[float, float, float, float],
-) -> bool:
-    try:
-        lon_f = float(lon)
-        lat_f = float(lat)
-    except (TypeError, ValueError):
-        return False
-    min_lon, min_lat, max_lon, max_lat = bbox
-    return min_lon <= lon_f <= max_lon and min_lat <= lat_f <= max_lat
-
-
 def _with_status(aed: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(aed)
     status: OpenStatus = compute_open_status(aed)
@@ -80,12 +83,8 @@ def _with_status(aed: dict[str, Any]) -> dict[str, Any]:
     return enriched
 
 
-def _ids_equal(left: Any, right: str) -> bool:
-    return str(left) == right
-
-
 @app.get("/api/gminy")
-def get_gminy(
+async def get_gminy(
     metric: str = Query(
         default="aed_per_10k_pop",
         description="Choropleth metric: aed_count | aed_per_100km2 | aed_per_10k_pop",
@@ -99,11 +98,37 @@ def get_gminy(
                 f"Allowed: {', '.join(sorted(VALID_METRICS))}"
             ),
         )
-    return enrich_gminy_with_metric(_gminy, metric)  # type: ignore[arg-type]
+    counts, _unassigned = await db.count_by_gmina()
+    with_counts = {
+        **_gminy,
+        "features": [
+            {
+                **feature,
+                "properties": {
+                    **feature["properties"],
+                    "aed_count": counts.get(str(feature["properties"].get("teryt")), 0),
+                },
+            }
+            for feature in _gminy.get("features", [])
+        ],
+    }
+    return enrich_gminy_with_metric(with_counts, metric)  # type: ignore[arg-type]
+
+
+@app.get("/api/frequencies", response_model=FrequenciesResponse)
+async def get_frequencies() -> FrequenciesResponse:
+    """AED counts per województwo / powiat / gmina (TERYT) for the choropleth map."""
+    counts, unassigned = await db.count_by_gmina()
+    rolled = rollup_counts(counts)
+    return FrequenciesResponse(
+        **rolled,
+        total=sum(counts.values()) + unassigned,
+        unassigned=unassigned,
+    )
 
 
 @app.get("/api/aed", response_model=AedListResponse)
-def list_aed(
+async def list_aed(
     bbox: str | None = Query(
         default=None,
         description="Optional bbox: min_lon,min_lat,max_lon,max_lat",
@@ -118,29 +143,29 @@ def list_aed(
         parsed_bbox = _parse_bbox(bbox)
 
     items: list[dict[str, Any]] = []
-    for aed in _aed_items:
-        if parsed_bbox is not None and not _in_bbox(
-            aed.get("lon"), aed.get("lat"), parsed_bbox
-        ):
-            continue
-        enriched = _with_status(aed)
+    for doc in await db.find_aed(parsed_bbox):
+        enriched = _with_status(to_api_aed(doc))
         if only_open_now:
             status = OpenStatus.model_validate(enriched["status"])
             if not is_open_now_status(status):
                 continue
         items.append(enriched)
 
-    return AedListResponse(items=items, count=len(items))
+    return AedListResponse(items=items, count=len(items))  # type: ignore[arg-type]
 
 
-@app.get("/api/aed/{aed_id}")
-def get_aed(aed_id: str) -> dict[str, Any]:
-    for aed in _aed_items:
-        if _ids_equal(aed.get("id"), aed_id):
-            return _with_status(aed)
-    raise HTTPException(status_code=404, detail=f"AED '{aed_id}' not found")
+@app.get("/api/aed/{aed_id}", response_model=AedItem)
+async def get_aed(aed_id: str) -> dict[str, Any]:
+    doc = await db.get_aed(aed_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"AED '{aed_id}' not found")
+    return _with_status(to_api_aed(doc))
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, str]:
+    try:
+        mongo = "ok" if await db.ping() else "not_connected"
+    except PyMongoError:
+        mongo = "unavailable"
+    return {"status": "ok", "mongo": mongo}

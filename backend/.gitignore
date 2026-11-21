@@ -5,3 +5,7 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 .DS_Store
+
+# local config / scraped data
+.env
+data/aed_scraped.json
