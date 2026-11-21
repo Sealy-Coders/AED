@@ -1,6 +1,18 @@
-import PolandCommunesMap from "./components/PolandCommunesMap";
+"use client";
+
+import { useRef } from "react";
+import CitySearch, { type CitySearchTarget } from "./components/CitySearch";
+import PolandCommunesMap, {
+  type PolandCommunesMapHandle,
+} from "./components/PolandCommunesMap";
 
 export default function Home() {
+  const mapRef = useRef<PolandCommunesMapHandle>(null);
+
+  const handleCitySelect = (target: CitySearchTarget) => {
+    mapRef.current?.flyToLocation(target.longitude, target.latitude);
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
@@ -13,8 +25,9 @@ export default function Home() {
           </p>
         </header>
 
-        <div className="h-[min(75vh,720px)]">
-          <PolandCommunesMap />
+        <div className="grid min-h-[520px] gap-4 lg:h-[min(75vh,720px)] lg:grid-cols-[minmax(0,1fr)_320px]">
+          <PolandCommunesMap ref={mapRef} />
+          <CitySearch onSelect={handleCitySelect} />
         </div>
       </div>
     </main>

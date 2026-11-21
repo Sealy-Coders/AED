@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   setWorkerUrl,
   type FillLayerSpecification,
@@ -20,6 +27,17 @@ export type DefibrillatorData = {
   communes?: Record<string, number>;
 };
 
+/** Response of `GET /api/frequencies` (counts keyed by TERYT code). */
+export type FrequenciesResponse = Required<DefibrillatorData> & {
+  total: number;
+  unassigned: number;
+};
+
+type LoadState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; data: DefibrillatorData; total: number };
+
 type HoveredArea = {
   longitude: number;
   latitude: number;
@@ -30,6 +48,10 @@ type HoveredArea = {
 
 type PolandCommunesMapProps = {
   defibrillatorData?: DefibrillatorData;
+};
+
+export type PolandCommunesMapHandle = {
+  flyToLocation: (longitude: number, latitude: number) => void;
 };
 
 const RED_COLORS = [
@@ -44,94 +66,134 @@ const RED_COLORS = [
 const GEOJSON_BASE =
   "https://raw.githubusercontent.com/waszkiewiczja/GeoJSON-Polska-Wojewodztwa-Powiaty-Gminy/main";
 
+const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+).replace(/\/$/, "");
+
+const EMPTY_DATA: DefibrillatorData = {};
+
+function countTotal(data: DefibrillatorData): number {
+  return Object.values(data.voivodeships ?? {}).reduce((a, b) => a + b, 0);
+}
+
 if (typeof window !== "undefined") {
   setWorkerUrl("/maplibre-worker");
 }
 
-export default function PolandCommunesMap({
-  defibrillatorData,
-}: PolandCommunesMapProps) {
+const PolandCommunesMap = forwardRef<
+  PolandCommunesMapHandle,
+  PolandCommunesMapProps
+>(function PolandCommunesMap({ defibrillatorData }, ref) {
   const mapRef = useRef<MapRef>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [zoom, setZoom] = useState(5.7);
-  const [demoData, setDemoData] = useState<DefibrillatorData>({});
   const [hoveredArea, setHoveredArea] = useState<HoveredArea | null>(null);
+  const [fetchState, setFetchState] = useState<LoadState>({
+    status: "loading",
+  });
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      flyToLocation: (longitude, latitude) => {
+        mapRef.current?.getMap().flyTo({
+          center: [longitude, latitude],
+          zoom: 10,
+          duration: 1200,
+        });
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     if (defibrillatorData) return;
 
-    fetch("/demo-frequencies.json")
+    const controller = new AbortController();
+
+    fetch(`${API_URL}/api/frequencies`, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) {
-          throw new Error("Nie udało się wczytać danych demonstracyjnych");
+          throw new Error(
+            response.status === 503
+              ? "Baza danych jest niedostępna"
+              : `Błąd serwera (${response.status})`,
+          );
         }
-        return response.json();
+        return response.json() as Promise<FrequenciesResponse>;
       })
-      .then((data: DefibrillatorData) => setDemoData(data))
-      .catch((error: unknown) => console.error(error));
-  }, [defibrillatorData]);
+      .then((response) => {
+        setFetchState({
+          status: "ready",
+          data: {
+            voivodeships: response.voivodeships ?? {},
+            counties: response.counties ?? {},
+            communes: response.communes ?? {},
+          },
+          total: response.total ?? 0,
+        });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        console.error(error);
+        setFetchState({
+          status: "error",
+          message:
+            error instanceof TypeError
+              ? "Brak połączenia z serwerem API"
+              : error instanceof Error
+                ? error.message
+                : "Nieznany błąd",
+        });
+      });
 
-  const data = defibrillatorData ?? demoData;
+    return () => controller.abort();
+  }, [defibrillatorData, reloadKey]);
+
+  const loadState: LoadState = defibrillatorData
+    ? {
+        status: "ready",
+        data: defibrillatorData,
+        total: countTotal(defibrillatorData),
+      }
+    : fetchState;
+  const data =
+    loadState.status === "ready" ? loadState.data : EMPTY_DATA;
   const level: HoveredArea["level"] =
     zoom >= 9 ? "gmina" : zoom >= 7 ? "powiat" : "województwo";
 
-  const maxCount = useMemo(() => {
-    const activeData =
-      level === "gmina"
-        ? data.communes
-        : level === "powiat"
-          ? data.counties
-          : data.voivodeships;
+  const sources = useMemo(
+    () =>
+      [
+        { id: "wojewodztwa", activeData: data.voivodeships },
+        { id: "powiaty", activeData: data.counties },
+        { id: "gminy", activeData: data.communes },
+      ] as const,
+    [data],
+  );
 
-    return Math.max(0, ...Object.values(activeData ?? {}));
-  }, [data, level]);
-
+  // Feature ids come from `promoteId="JPT_KOD_JE"`, so state can be set per
+  // TERYT code directly — this also colours tiles loaded later (pan/zoom).
+  // Each source is normalised by its own max; only one level is visible at a time.
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
 
-    const map = mapRef.current;
-    const sources = [
-      {
-        id: "wojewodztwa",
-        activeData: data.voivodeships,
-      },
-      {
-        id: "powiaty",
-        activeData: data.counties,
-      },
-      {
-        id: "gminy",
-        activeData: data.communes,
-      },
-    ] as const;
-
+    const map = mapRef.current.getMap();
     for (const source of sources) {
-      const features = map.querySourceFeatures(source.id);
-      for (const feature of features) {
-        const code = String(feature.properties?.JPT_KOD_JE ?? "");
-        const count = source.activeData?.[code] ?? 0;
-        const normalizedCount =
-          level === "gmina" && source.id === "gminy"
-            ? maxCount > 0
-              ? count / maxCount
-              : 0
-            : level === "powiat" && source.id === "powiaty"
-              ? maxCount > 0
-                ? count / maxCount
-                : 0
-              : level === "województwo" && source.id === "wojewodztwa"
-                ? maxCount > 0
-                  ? count / maxCount
-                  : 0
-                : 0;
-
+      if (!map.getSource(source.id)) continue;
+      map.removeFeatureState({ source: source.id });
+      const entries = Object.entries(source.activeData ?? {});
+      const maxCount = Math.max(0, ...entries.map(([, count]) => count));
+      if (maxCount === 0) continue;
+      for (const [code, count] of entries) {
         map.setFeatureState(
-          { source: source.id, id: feature.id },
-          { frequency: normalizedCount },
+          { source: source.id, id: code },
+          { frequency: count / maxCount },
         );
       }
     }
-  }, [data, level, mapLoaded, maxCount]);
+  }, [sources, mapLoaded]);
 
   const fillPaint: FillLayerSpecification["paint"] = {
     "fill-color": [
@@ -311,9 +373,51 @@ export default function PolandCommunesMap({
         )}
       </Map>
 
+      {loadState.status === "loading" && (
+        <div
+          role="status"
+          className="pointer-events-none absolute inset-x-0 top-4 mx-auto w-fit rounded-xl border border-slate-200 bg-white/95 px-4 py-2 text-sm text-slate-700 shadow-md"
+        >
+          Wczytywanie danych o defibrylatorach…
+        </div>
+      )}
+
+      {loadState.status === "error" && (
+        <div
+          role="alert"
+          className="absolute inset-x-0 top-4 mx-auto flex w-fit items-center gap-3 rounded-xl border border-red-200 bg-white/95 px-4 py-2 text-sm text-red-800 shadow-md"
+        >
+          <span>Nie udało się wczytać danych: {loadState.message}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setFetchState({ status: "loading" });
+              setReloadKey((key) => key + 1);
+            }}
+            className="rounded-lg bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
+          >
+            Spróbuj ponownie
+          </button>
+        </div>
+      )}
+
+      {loadState.status === "ready" && loadState.total === 0 && (
+        <div
+          role="status"
+          className="pointer-events-none absolute inset-x-0 top-4 mx-auto w-fit rounded-xl border border-amber-200 bg-white/95 px-4 py-2 text-sm text-amber-800 shadow-md"
+        >
+          Brak danych o defibrylatorach w bazie.
+        </div>
+      )}
+
       <div className="pointer-events-none absolute bottom-4 left-4 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 shadow-md">
         <p className="mb-1 text-xs font-semibold text-slate-700">
           Defibrylatory - {level}
+          {loadState.status === "ready" && loadState.total > 0 && (
+            <span className="ml-1 font-normal text-slate-500">
+              (łącznie {loadState.total.toLocaleString("pl-PL")})
+            </span>
+          )}
         </p>
         <div className="flex items-center gap-1">
           {RED_COLORS.map((color) => (
@@ -327,4 +431,6 @@ export default function PolandCommunesMap({
       </div>
     </div>
   );
-}
+});
+
+export default PolandCommunesMap;
