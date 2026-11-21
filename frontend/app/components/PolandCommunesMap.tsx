@@ -13,7 +13,7 @@ import {
   setWorkerUrl,
   type FillLayerSpecification,
 } from "maplibre-gl";
-import Map, {
+import MapLibreMap, {
   Layer,
   Marker,
   NavigationControl,
@@ -86,6 +86,21 @@ type HoveredArea = {
   name: string;
   count: number;
   level: "województwo" | "powiat" | "gmina";
+};
+
+type AedCluster = {
+  longitude: number;
+  latitude: number;
+  items: AedItem[];
+  name?: string;
+};
+
+type GeoJsonCentroidFeature = {
+  geometry?: {
+    type?: string;
+    coordinates?: unknown;
+  };
+  properties?: Record<string, unknown>;
 };
 
 type PolandCommunesMapProps = {
@@ -186,6 +201,67 @@ function countTotal(data: DefibrillatorData): number {
   return Object.values(data.voivodeships ?? {}).reduce((a, b) => a + b, 0);
 }
 
+function ringCentroid(ring: unknown): [number, number] | null {
+  if (!Array.isArray(ring) || ring.length === 0) return null;
+
+  let longitude = 0;
+  let latitude = 0;
+  let validPoints = 0;
+
+  for (const point of ring) {
+    if (!Array.isArray(point) || point.length < 2) continue;
+    const lon = Number(point[0]);
+    const lat = Number(point[1]);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+    longitude += lon;
+    latitude += lat;
+    validPoints += 1;
+  }
+
+  if (validPoints === 0) return null;
+  return [longitude / validPoints, latitude / validPoints];
+}
+
+function geometryCentroid(feature: GeoJsonCentroidFeature): [number, number] | null {
+  const geometry = feature.geometry;
+  if (!geometry?.coordinates) return null;
+
+  if (geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
+    return ringCentroid((geometry.coordinates as unknown[])[0]);
+  }
+
+  if (geometry.type === "MultiPolygon" && Array.isArray(geometry.coordinates)) {
+    let largestRing: unknown = null;
+    let largestArea = -1;
+
+    for (const polygon of geometry.coordinates as unknown[]) {
+      if (!Array.isArray(polygon)) continue;
+      const ring = polygon[0];
+      if (!Array.isArray(ring) || ring.length === 0) continue;
+
+      let area = 0;
+      for (let index = 0; index < ring.length; index += 1) {
+        const current = ring[index] as unknown[];
+        const next = ring[(index + 1) % ring.length] as unknown[];
+        if (!Array.isArray(current) || !Array.isArray(next)) continue;
+        area +=
+          Number(current[0]) * Number(next[1]) -
+          Number(next[0]) * Number(current[1]);
+      }
+
+      const absoluteArea = Math.abs(area);
+      if (absoluteArea > largestArea) {
+        largestArea = absoluteArea;
+        largestRing = ring;
+      }
+    }
+
+    return ringCentroid(largestRing);
+  }
+
+  return null;
+}
+
 if (typeof window !== "undefined") {
   setWorkerUrl("/maplibre-worker");
 }
@@ -205,6 +281,13 @@ const PolandCommunesMap = forwardRef<
   const [aedLoadError, setAedLoadError] = useState<string | null>(null);
   const aedAbortRef = useRef<AbortController | null>(null);
   const aedRequestKeyRef = useRef("");
+  const [regionCentroids, setRegionCentroids] = useState<{
+    voivodeships: Map<string, [number, number, string]>;
+    counties: Map<string, [number, number, string]>;
+  }>({
+    voivodeships: new Map(),
+    counties: new Map(),
+  });
   const [fetchState, setFetchState] = useState<LoadState>({
     status: "loading",
   });
@@ -398,6 +481,41 @@ const PolandCommunesMap = forwardRef<
     return () => controller.abort();
   }, [defibrillatorData, reloadKey]);
 
+  useEffect(() => {
+    const loadRegion = async (
+      url: string,
+      codeLength: 2 | 4,
+    ) => {
+      const response = await fetch(url);
+      if (!response.ok) return new Map<string, [number, number, string]>();
+      const geojson = (await response.json()) as {
+        features?: GeoJsonCentroidFeature[];
+      };
+      const centers = new Map<string, [number, number, string]>();
+
+      for (const feature of geojson.features ?? []) {
+        const code = String(
+          feature.properties?.JPT_KOD_JE ?? "",
+        ).slice(0, codeLength);
+        const name = String(feature.properties?.JPT_NAZWA_ ?? "").trim();
+        const center = geometryCentroid(feature);
+        if (!code || !center) continue;
+        centers.set(code, [center[0], center[1], name]);
+      }
+
+      return centers;
+    };
+
+    Promise.all([
+      loadRegion(`${GEOJSON_BASE}/wojewodztwa.json`, 2),
+      loadRegion(`${GEOJSON_BASE}/powiaty.json`, 4),
+    ])
+      .then(([voivodeships, counties]) => {
+        setRegionCentroids({ voivodeships, counties });
+      })
+      .catch((error: unknown) => console.error(error));
+  }, []);
+
   const loadState: LoadState = defibrillatorData
     ? {
         status: "ready",
@@ -421,7 +539,7 @@ const PolandCommunesMap = forwardRef<
     if (!mapRef.current) return;
 
     const mapZoom = mapRef.current.getZoom();
-    if (mapZoom < 9) return;
+    if (mapZoom < 5) return;
 
     const bounds = mapRef.current.getBounds();
     const sw = bounds.getSouthWest();
@@ -542,9 +660,60 @@ const PolandCommunesMap = forwardRef<
         : "wojewodztwa";
   const interactiveLayerIds = [`${visibleLevel}-fill`];
 
+  const aedClusters = useMemo<AedCluster[]>(() => {
+    if (aedItems.length === 0) return [];
+
+    if (zoom >= 9) {
+      return aedItems.map((item) => ({
+        longitude: item.lon,
+        latitude: item.lat,
+        items: [item],
+        name: item.name,
+      }));
+    }
+
+    const groups = new Map<string, AedItem[]>();
+    const codeLength = zoom >= 7 ? 4 : 2;
+
+    for (const item of aedItems) {
+      const code = String(item.teryt_gmina ?? "").replace(/\D/g, "");
+      const key = code.length >= codeLength
+        ? code.slice(0, codeLength)
+        : `fallback:${item.lon.toFixed(3)}:${item.lat.toFixed(3)}`;
+      const group = groups.get(key);
+      if (group) group.push(item);
+      else groups.set(key, [item]);
+    }
+
+    return Array.from(groups.entries()).map(([key, items]) => {
+      const center =
+        codeLength === 4
+          ? regionCentroids.counties.get(key)
+          : regionCentroids.voivodeships.get(key);
+
+      if (center) {
+        return {
+          longitude: center[0],
+          latitude: center[1],
+          items,
+          name: center[2],
+        };
+      }
+
+      return {
+        longitude:
+          items.reduce((sum, item) => sum + item.lon, 0) / items.length,
+        latitude:
+          items.reduce((sum, item) => sum + item.lat, 0) / items.length,
+        items,
+        name: codeLength === 4 ? "powiat" : "województwo",
+      };
+    });
+  }, [aedItems, regionCentroids, zoom]);
+
   return (
     <div className="relative h-full min-h-[520px] w-full overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 shadow-sm">
-      <Map
+      <MapLibreMap
         ref={mapRef}
         initialViewState={{
           longitude: 19.2,
@@ -557,17 +726,13 @@ const PolandCommunesMap = forwardRef<
         dragRotate={false}
         touchPitch={false}
         interactiveLayerIds={interactiveLayerIds}
-        onLoad={() => setMapLoaded(true)}
+        onLoad={() => {
+          setMapLoaded(true);
+          loadAedMarkers();
+        }}
         onMove={(event) => {
           const nextZoom = event.viewState.zoom;
           setZoom(nextZoom);
-          if (nextZoom < 9) {
-            aedAbortRef.current?.abort();
-            aedRequestKeyRef.current = "";
-            setAedItems([]);
-            setSelectedAed(null);
-            setAedLoadError(null);
-          }
         }}
         onMouseMove={(event) => {
           const feature = event.features?.[0];
@@ -715,27 +880,67 @@ const PolandCommunesMap = forwardRef<
           </Popup>
         )}
 
-        {zoom >= 9 &&
-          aedItems.map((aed) => (
+        {aedClusters.map((cluster) => {
+          const count = cluster.items.length;
+          const isSingle = count === 1;
+          const is24Hour = cluster.items.some(
+            (item) => item.status.key === "open_24_7",
+          );
+          const showRedPin = zoom >= 9 && is24Hour;
+          const size =
+            zoom >= 9 ? 38 :
+            zoom >= 7 ? 46 :
+            54;
+          const key = `${cluster.longitude.toFixed(5)}:${cluster.latitude.toFixed(5)}`;
+
+          return (
             <Marker
-              key={aed.id}
-              longitude={aed.lon}
-              latitude={aed.lat}
+              key={key}
+              longitude={cluster.longitude}
+              latitude={cluster.latitude}
               anchor="bottom"
               onClick={(event) => {
                 event.originalEvent.stopPropagation();
-                setSelectedAed(aed);
+                if (isSingle) {
+                  setSelectedAed(cluster.items[0]);
+                } else {
+                  mapRef.current?.getMap().flyTo({
+                    center: [cluster.longitude, cluster.latitude],
+                    zoom: zoom < 7 ? 7 : zoom < 9 ? 9 : 12,
+                    duration: 700,
+                  });
+                }
               }}
             >
-              <button
-                type="button"
-                aria-label={`Pokaż dane defibrylatora: ${aed.name}`}
-                className={`aed-marker ${aed.status.key === "open_24_7" || aed.status.key === "open_now" ? "aed-marker--available" : ""}`}
-              >
-                <span aria-hidden="true">AED</span>
-              </button>
+              <div className="aed-pin" style={{ width: size, height: size * 0.8 }}>
+                <button
+                  type="button"
+                  aria-label={
+                    isSingle
+                      ? `Pokaż dane defibrylatora: ${cluster.items[0].name}`
+                      : `Powiększ ${cluster.name ?? "grupę"}: ${count} defibrylatorów`
+                  }
+                  className="block h-full w-full border-0 bg-transparent p-0"
+                >
+                  <img
+                    src={showRedPin ? "/pin.svg" : "/pin-navy.svg"}
+                    alt=""
+                    draggable={false}
+                    className="h-full w-full"
+                  />
+                </button>
+                {!isSingle && (
+                  <span
+                    aria-hidden="true"
+                    className="aed-pin__label"
+                  >
+                    {count} AED
+                  </span>
+                )}
+              </div>
             </Marker>
-          ))}
+          );
+        })}
 
         {userLocation && (
           <Marker
@@ -846,7 +1051,7 @@ const PolandCommunesMap = forwardRef<
             </div>
           </Popup>
         )}
-      </Map>
+      </MapLibreMap>
 
       {loadState.status === "loading" && (
         <div
@@ -885,7 +1090,7 @@ const PolandCommunesMap = forwardRef<
         </div>
       )}
 
-      {zoom >= 9 && aedLoadError && (
+      {aedLoadError && (
         <div
           role="alert"
           className="pointer-events-none absolute inset-x-0 top-16 mx-auto w-fit rounded-xl border border-red-200 bg-white/95 px-4 py-2 text-sm text-red-800 shadow-md"
@@ -894,9 +1099,9 @@ const PolandCommunesMap = forwardRef<
         </div>
       )}
 
-      {zoom >= 9 && aedLoadError === null && (
+      {aedLoadError === null && (
         <div className="pointer-events-none absolute right-4 top-16 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-md">
-          Pinezki: {aedItems.length}
+          Grup: {aedClusters.length}
         </div>
       )}
 
