@@ -2,6 +2,7 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -21,6 +22,7 @@ import Map, {
   type MapRef,
 } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { findGminaAt, loadGminyFeatures, type GminaMatch } from "../lib/gminy";
 
 export type DefibrillatorData = {
   voivodeships?: Record<string, number>;
@@ -97,6 +99,19 @@ type SelectedLocation = {
   voivodeship: string;
 };
 
+type UserLocation = {
+  longitude: number;
+  latitude: number;
+  /** Radius in metres (GeolocationCoordinates.accuracy). */
+  accuracy: number;
+};
+
+type GeoState =
+  | { status: "locating" }
+  | { status: "active" }
+  | { status: "off" }
+  | { status: "error"; message: string };
+
 export type PolandCommunesMapHandle = {
   flyToLocation: (
     longitude: number,
@@ -123,6 +138,26 @@ const API_URL = (
 ).replace(/\/$/, "");
 
 const EMPTY_DATA: DefibrillatorData = {};
+
+/** Zoom from which gminy borders and AED pins are shown. */
+const GMINA_ZOOM = 9;
+const MAX_ZOOM = 12;
+
+const GEOLOCATION_OPTIONS: PositionOptions = {
+  enableHighAccuracy: true,
+  maximumAge: 10_000,
+  timeout: 20_000,
+};
+
+function geolocationErrorMessage(error: GeolocationPositionError): string {
+  if (error.code === error.PERMISSION_DENIED) {
+    return "Brak zgody na udostępnienie lokalizacji";
+  }
+  if (error.code === error.TIMEOUT) {
+    return "Przekroczono czas oczekiwania na lokalizację";
+  }
+  return "Nie udało się ustalić lokalizacji";
+}
 
 const WEEKDAY_NAMES = ["pon.", "wt.", "śr.", "czw.", "pt.", "sob.", "niedz."] as const;
 
@@ -174,6 +209,135 @@ const PolandCommunesMap = forwardRef<
     status: "loading",
   });
   const [reloadKey, setReloadKey] = useState(0);
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  /** `undefined` = not resolved yet, `null` = outside every gmina (outside Poland). */
+  const [userGmina, setUserGmina] = useState<GminaMatch | null | undefined>();
+  const [geoState, setGeoState] = useState<GeoState>({ status: "locating" });
+  const watchIdRef = useRef<number | null>(null);
+  const userLocationRef = useRef<UserLocation | null>(null);
+  const zoomOnNextFixRef = useRef(true);
+
+  /** Resolves the user's gmina and (optionally) fits the view to it. */
+  const focusUserGmina = useCallback(
+    (location: UserLocation, fly: boolean) => {
+      loadGminyFeatures()
+        .then((features) =>
+          findGminaAt(features, location.longitude, location.latitude),
+        )
+        .catch((error: unknown) => {
+          console.error(error);
+          return undefined;
+        })
+        .then((gmina) => {
+          if (watchIdRef.current === null) return; // tracking was stopped
+          setUserGmina(gmina);
+          if (!fly) return;
+
+          const map = mapRef.current?.getMap();
+          if (!map) return;
+          const camera = gmina
+            ? map.cameraForBounds(
+                [
+                  [gmina.bbox[0], gmina.bbox[1]],
+                  [gmina.bbox[2], gmina.bbox[3]],
+                ],
+                { padding: 48 },
+              )
+            : undefined;
+          map.flyTo({
+            center: camera?.center ?? [location.longitude, location.latitude],
+            // At least GMINA_ZOOM so the gminy layer and AED pins are visible.
+            zoom: Math.min(
+              MAX_ZOOM,
+              Math.max(GMINA_ZOOM, camera?.zoom ?? GMINA_ZOOM + 1),
+            ),
+            duration: 1400,
+          });
+        });
+    },
+    [],
+  );
+
+  const stopWatching = useCallback(() => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+  }, []);
+
+  const startWatching = useCallback(() => {
+    if (!window.isSecureContext || !("geolocation" in navigator)) {
+      setGeoState({
+        status: "error",
+        message: window.isSecureContext
+          ? "Przeglądarka nie obsługuje geolokalizacji"
+          : "Lokalizacja wymaga połączenia HTTPS (lub localhost)",
+      });
+      return;
+    }
+
+    stopWatching();
+    zoomOnNextFixRef.current = true;
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const location: UserLocation = {
+          longitude: position.coords.longitude,
+          latitude: position.coords.latitude,
+          accuracy: position.coords.accuracy,
+        };
+        userLocationRef.current = location;
+        setUserLocation(location);
+        setGeoState({ status: "active" });
+        // Zoom only on the first fix — later updates just move the marker.
+        const fly = zoomOnNextFixRef.current;
+        zoomOnNextFixRef.current = false;
+        focusUserGmina(location, fly);
+      },
+      (error) => {
+        // Transient errors while tracking keep the last known position.
+        if (
+          error.code !== error.PERMISSION_DENIED &&
+          userLocationRef.current
+        ) {
+          return;
+        }
+        if (error.code === error.PERMISSION_DENIED) {
+          stopWatching();
+          userLocationRef.current = null;
+          setUserLocation(null);
+          setUserGmina(undefined);
+        }
+        setGeoState({
+          status: "error",
+          message: geolocationErrorMessage(error),
+        });
+      },
+      GEOLOCATION_OPTIONS,
+    );
+  }, [focusUserGmina, stopWatching]);
+
+  const hideUserLocation = () => {
+    stopWatching();
+    userLocationRef.current = null;
+    setUserLocation(null);
+    setUserGmina(undefined);
+    setGeoState({ status: "off" });
+  };
+
+  const handleLocateClick = () => {
+    if (geoState.status === "active" && userLocationRef.current) {
+      focusUserGmina(userLocationRef.current, true);
+      return;
+    }
+    setGeoState({ status: "locating" });
+    startWatching();
+  };
+
+  // Ask for the user's position once on load; the button retries / re-centres.
+  useEffect(() => {
+    startWatching();
+    return stopWatching;
+  }, [startWatching, stopWatching]);
 
   useImperativeHandle(
     ref,
@@ -573,6 +737,21 @@ const PolandCommunesMap = forwardRef<
             </Marker>
           ))}
 
+        {userLocation && (
+          <Marker
+            longitude={userLocation.longitude}
+            latitude={userLocation.latitude}
+            anchor="center"
+          >
+            <div
+              role="img"
+              aria-label="Twoja lokalizacja"
+              title={`Twoja lokalizacja (dokładność ±${Math.round(userLocation.accuracy)} m)`}
+              className="user-location-dot"
+            />
+          </Marker>
+        )}
+
         {selectedAed && zoom >= 9 && (
           <Popup
             longitude={selectedAed.lon}
@@ -721,23 +900,97 @@ const PolandCommunesMap = forwardRef<
         </div>
       )}
 
-      <div className="pointer-events-none absolute bottom-4 left-4 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 shadow-md">
-        <p className="mb-1 text-xs font-semibold text-slate-700">
-          Defibrylatory - {level}
-          {loadState.status === "ready" && loadState.total > 0 && (
-            <span className="ml-1 font-normal text-slate-500">
-              (łącznie {loadState.total.toLocaleString("pl-PL")})
-            </span>
+      <div className="pointer-events-none absolute bottom-4 left-4 flex max-w-[calc(100%-2rem)] flex-col items-start gap-2">
+        {geoState.status === "active" && userGmina && (
+          <div
+            role="status"
+            className="rounded-xl border border-blue-200 bg-white/95 px-3 py-2 text-xs text-slate-700 shadow-md"
+          >
+            Jesteś w gminie{" "}
+            <strong className="text-slate-900">{userGmina.name}</strong>
+            {loadState.status === "ready" && (
+              <span className="block text-slate-500">
+                Defibrylatory w gminie: {data.communes?.[userGmina.code] ?? 0}
+              </span>
+            )}
+          </div>
+        )}
+
+        {geoState.status === "active" && userGmina === null && (
+          <div
+            role="status"
+            className="rounded-xl border border-amber-200 bg-white/95 px-3 py-2 text-xs text-amber-800 shadow-md"
+          >
+            Twoja lokalizacja jest poza granicami Polski.
+          </div>
+        )}
+
+        {geoState.status === "error" && (
+          <div
+            role="alert"
+            className="rounded-xl border border-red-200 bg-white/95 px-3 py-2 text-xs text-red-800 shadow-md"
+          >
+            {geoState.message}
+          </div>
+        )}
+
+        <div className="pointer-events-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleLocateClick}
+            disabled={geoState.status === "locating"}
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-75"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className={`h-4 w-4 ${geoState.status === "active" ? "text-blue-600" : "text-slate-500"} ${geoState.status === "locating" ? "animate-pulse" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <circle cx="12" cy="12" r="7" />
+              <circle cx="12" cy="12" r="2.5" fill="currentColor" />
+              <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+            </svg>
+            {geoState.status === "locating"
+              ? "Ustalanie lokalizacji…"
+              : geoState.status === "active"
+                ? "Pokaż moją gminę"
+                : "Moja lokalizacja"}
+          </button>
+          {geoState.status === "active" && (
+            <button
+              type="button"
+              onClick={hideUserLocation}
+              aria-label="Wyłącz śledzenie lokalizacji"
+              title="Wyłącz śledzenie lokalizacji"
+              className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white/95 text-base leading-none text-slate-500 shadow-md transition hover:bg-white hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              ×
+            </button>
           )}
-        </p>
-        <div className="flex items-center gap-1">
-          {RED_COLORS.map((color) => (
-            <span
-              key={color}
-              className="h-2 w-5"
-              style={{ backgroundColor: color }}
-            />
-          ))}
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white/95 px-3 py-2 shadow-md">
+          <p className="mb-1 text-xs font-semibold text-slate-700">
+            Defibrylatory - {level}
+            {loadState.status === "ready" && loadState.total > 0 && (
+              <span className="ml-1 font-normal text-slate-500">
+                (łącznie {loadState.total.toLocaleString("pl-PL")})
+              </span>
+            )}
+          </p>
+          <div className="flex items-center gap-1">
+            {RED_COLORS.map((color) => (
+              <span
+                key={color}
+                className="h-2 w-5"
+                style={{ backgroundColor: color }}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>

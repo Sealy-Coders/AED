@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { loadGminyFeatures, type GminaFeature } from "../lib/gminy";
 
 export type CitySearchTarget = {
   name: string;
@@ -12,17 +13,6 @@ export type CitySearchTarget = {
 
 type CitySearchProps = {
   onSelect: (target: CitySearchTarget) => void;
-};
-
-type GeoJsonFeature = {
-  geometry: {
-    type: "Polygon" | "MultiPolygon";
-    coordinates: number[][][] | number[][][][];
-  };
-  properties?: {
-    JPT_KOD_JE?: string;
-    JPT_NAZWA_?: string;
-  };
 };
 
 const VOIVODESHIPS: Record<string, string> = {
@@ -62,7 +52,7 @@ function ringCentroid(ring: number[][]) {
   return [longitude / length, latitude / length] as const;
 }
 
-function geometryCentroid(feature: GeoJsonFeature) {
+function geometryCentroid(feature: GminaFeature) {
   if (feature.geometry.type === "Polygon") {
     return ringCentroid(feature.geometry.coordinates[0] as number[][]);
   }
@@ -95,13 +85,9 @@ export default function CitySearch({ onSelect }: CitySearchProps) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/geojson/gminy.json")
-      .then((response) => {
-        if (!response.ok) throw new Error("Nie udało się wczytać miejscowości");
-        return response.json();
-      })
-      .then((geojson: { features: GeoJsonFeature[] }) => {
-        const targets = geojson.features
+    loadGminyFeatures()
+      .then((features) => {
+        const targets = features
           .map((feature) => {
             const code = String(feature.properties?.JPT_KOD_JE ?? "");
             const name = String(feature.properties?.JPT_NAZWA_ ?? "").trim();
