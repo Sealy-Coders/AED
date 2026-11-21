@@ -10,7 +10,12 @@ export default function Home() {
   const mapRef = useRef<PolandCommunesMapHandle>(null);
 
   const handleCitySelect = (target: CitySearchTarget) => {
-    mapRef.current?.flyToLocation(target.longitude, target.latitude);
+    mapRef.current?.flyToLocation(
+      target.longitude,
+      target.latitude,
+      target.name,
+      target.voivodeship,
+    );
   };
 
   return (

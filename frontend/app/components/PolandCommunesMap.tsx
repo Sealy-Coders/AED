@@ -14,6 +14,7 @@ import {
 } from "maplibre-gl";
 import Map, {
   Layer,
+  Marker,
   NavigationControl,
   Popup,
   Source,
@@ -33,6 +34,45 @@ export type FrequenciesResponse = Required<DefibrillatorData> & {
   unassigned: number;
 };
 
+export type AedStatus = {
+  key: "open_24_7" | "open_now" | "closed_now" | "unknown";
+  label: string;
+  badge: "open_24_7" | "open_now" | "closed_now" | "unknown";
+};
+
+export type AedItem = {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  teryt_gmina?: string | null;
+  gmina_name?: string | null;
+  address?: string | null;
+  city?: string | null;
+  location_detail?: string | null;
+  placement?: string | null;
+  cabinet?: string | null;
+  access_note?: string | null;
+  is_24_7: boolean;
+  opening_hours_simple?: {
+    days: number[];
+    start: string;
+    end: string;
+  } | null;
+  opening_hours_raw?: string | null;
+  pediatric_mode?: boolean | null;
+  last_verified?: string | null;
+  locked: boolean;
+  operator?: string | null;
+  source?: string | null;
+  status: AedStatus;
+};
+
+type AedListResponse = {
+  items: AedItem[];
+  count: number;
+};
+
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -50,8 +90,20 @@ type PolandCommunesMapProps = {
   defibrillatorData?: DefibrillatorData;
 };
 
+type SelectedLocation = {
+  longitude: number;
+  latitude: number;
+  name: string;
+  voivodeship: string;
+};
+
 export type PolandCommunesMapHandle = {
-  flyToLocation: (longitude: number, latitude: number) => void;
+  flyToLocation: (
+    longitude: number,
+    latitude: number,
+    name: string,
+    voivodeship: string,
+  ) => void;
 };
 
 const RED_COLORS = [
@@ -72,6 +124,29 @@ const API_URL = (
 
 const EMPTY_DATA: DefibrillatorData = {};
 
+const WEEKDAY_NAMES = ["pon.", "wt.", "śr.", "czw.", "pt.", "sob.", "niedz."] as const;
+
+function formatOpeningHours(aed: AedItem): string {
+  if (aed.is_24_7) return "Całodobowo (24/7)";
+  if (!aed.opening_hours_simple) return aed.opening_hours_raw ?? "Godziny nieznane";
+
+  const days = [...new Set(aed.opening_hours_simple.days)]
+    .sort((a, b) => a - b)
+    .map((day) => WEEKDAY_NAMES[day])
+    .join(", ");
+  return `${days}: ${aed.opening_hours_simple.start}-${aed.opening_hours_simple.end}`;
+}
+
+function statusClasses(key: AedStatus["key"]): string {
+  if (key === "open_now" || key === "open_24_7") {
+    return "bg-emerald-100 text-emerald-800";
+  }
+  if (key === "closed_now") {
+    return "bg-red-100 text-red-800";
+  }
+  return "bg-slate-100 text-slate-700";
+}
+
 function countTotal(data: DefibrillatorData): number {
   return Object.values(data.voivodeships ?? {}).reduce((a, b) => a + b, 0);
 }
@@ -88,6 +163,13 @@ const PolandCommunesMap = forwardRef<
   const [mapLoaded, setMapLoaded] = useState(false);
   const [zoom, setZoom] = useState(5.7);
   const [hoveredArea, setHoveredArea] = useState<HoveredArea | null>(null);
+  const [aedItems, setAedItems] = useState<AedItem[]>([]);
+  const [selectedAed, setSelectedAed] = useState<AedItem | null>(null);
+  const [selectedLocation, setSelectedLocation] =
+    useState<SelectedLocation | null>(null);
+  const [aedLoadError, setAedLoadError] = useState<string | null>(null);
+  const aedAbortRef = useRef<AbortController | null>(null);
+  const aedRequestKeyRef = useRef("");
   const [fetchState, setFetchState] = useState<LoadState>({
     status: "loading",
   });
@@ -96,7 +178,8 @@ const PolandCommunesMap = forwardRef<
   useImperativeHandle(
     ref,
     () => ({
-      flyToLocation: (longitude, latitude) => {
+      flyToLocation: (longitude, latitude, name, voivodeship) => {
+        setSelectedLocation({ longitude, latitude, name, voivodeship });
         mapRef.current?.getMap().flyTo({
           center: [longitude, latitude],
           zoom: 10,
@@ -162,6 +245,77 @@ const PolandCommunesMap = forwardRef<
     loadState.status === "ready" ? loadState.data : EMPTY_DATA;
   const level: HoveredArea["level"] =
     zoom >= 9 ? "gmina" : zoom >= 7 ? "powiat" : "województwo";
+
+  useEffect(
+    () => () => {
+      aedAbortRef.current?.abort();
+    },
+    [],
+  );
+
+  const loadAedMarkers = () => {
+    if (!mapRef.current) return;
+
+    const mapZoom = mapRef.current.getZoom();
+    if (mapZoom < 9) return;
+
+    const bounds = mapRef.current.getBounds();
+    const sw = bounds.getSouthWest();
+    const ne = bounds.getNorthEast();
+    const requestKey = [
+      sw.lng.toFixed(4),
+      sw.lat.toFixed(4),
+      ne.lng.toFixed(4),
+      ne.lat.toFixed(4),
+    ].join(",");
+
+    if (aedRequestKeyRef.current === requestKey) return;
+    aedRequestKeyRef.current = requestKey;
+    aedAbortRef.current?.abort();
+
+    const controller = new AbortController();
+    aedAbortRef.current = controller;
+    setAedLoadError(null);
+
+    fetch(
+      `${API_URL}/api/aed?bbox=${[
+        sw.lng,
+        sw.lat,
+        ne.lng,
+        ne.lat,
+      ].join(",")}`,
+      { signal: controller.signal },
+    )
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(
+            response.status === 503
+              ? "Baza danych jest niedostępna"
+              : `Błąd serwera (${response.status})`,
+          );
+        }
+        return response.json() as Promise<AedListResponse>;
+      })
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        setAedItems(
+          response.items.filter(
+            (item) =>
+              Number.isFinite(item.lat) &&
+              Number.isFinite(item.lon),
+          ),
+        );
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setAedItems([]);
+        setAedLoadError(
+          error instanceof Error
+            ? error.message
+            : "Nie udało się wczytać pinezek",
+        );
+      });
+  };
 
   const sources = useMemo(
     () =>
@@ -240,7 +394,17 @@ const PolandCommunesMap = forwardRef<
         touchPitch={false}
         interactiveLayerIds={interactiveLayerIds}
         onLoad={() => setMapLoaded(true)}
-        onMove={(event) => setZoom(event.viewState.zoom)}
+        onMove={(event) => {
+          const nextZoom = event.viewState.zoom;
+          setZoom(nextZoom);
+          if (nextZoom < 9) {
+            aedAbortRef.current?.abort();
+            aedRequestKeyRef.current = "";
+            setAedItems([]);
+            setSelectedAed(null);
+            setAedLoadError(null);
+          }
+        }}
         onMouseMove={(event) => {
           const feature = event.features?.[0];
           if (!feature) {
@@ -273,6 +437,7 @@ const PolandCommunesMap = forwardRef<
           });
         }}
         onMouseLeave={() => setHoveredArea(null)}
+        onMoveEnd={loadAedMarkers}
       >
         <Source
           id="wojewodztwa"
@@ -350,6 +515,137 @@ const PolandCommunesMap = forwardRef<
           />
         </Source>
 
+        {selectedLocation && (
+          <Marker
+            longitude={selectedLocation.longitude}
+            latitude={selectedLocation.latitude}
+            anchor="bottom"
+          >
+            <div
+              aria-label={`Wybrano: ${selectedLocation.name}, województwo ${selectedLocation.voivodeship}`}
+              className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-sky-600 shadow-[0_4px_14px_rgba(2,132,199,0.45)]"
+            >
+              <span className="h-3 w-3 rounded-full bg-white" />
+            </div>
+          </Marker>
+        )}
+
+        {selectedLocation && (
+          <Popup
+            longitude={selectedLocation.longitude}
+            latitude={selectedLocation.latitude}
+            anchor="top"
+            offset={18}
+            closeButton={false}
+            closeOnClick={false}
+            className="commune-popup"
+          >
+            <div className="px-1 py-0.5">
+              <strong className="block text-sm text-slate-900">
+                {selectedLocation.name}
+              </strong>
+              <span className="block text-xs text-slate-600">
+                woj. {selectedLocation.voivodeship}
+              </span>
+            </div>
+          </Popup>
+        )}
+
+        {zoom >= 9 &&
+          aedItems.map((aed) => (
+            <Marker
+              key={aed.id}
+              longitude={aed.lon}
+              latitude={aed.lat}
+              anchor="bottom"
+              onClick={(event) => {
+                event.originalEvent.stopPropagation();
+                setSelectedAed(aed);
+              }}
+            >
+              <button
+                type="button"
+                aria-label={`Pokaż dane defibrylatora: ${aed.name}`}
+                className={`aed-marker ${aed.status.key === "open_24_7" || aed.status.key === "open_now" ? "aed-marker--available" : ""}`}
+              >
+                <span aria-hidden="true">AED</span>
+              </button>
+            </Marker>
+          ))}
+
+        {selectedAed && zoom >= 9 && (
+          <Popup
+            longitude={selectedAed.lon}
+            latitude={selectedAed.lat}
+            anchor="top"
+            offset={16}
+            closeOnClick={false}
+            onClose={() => setSelectedAed(null)}
+            className="aed-detail-popup"
+            maxWidth="320px"
+          >
+            <div className="w-[280px] max-w-[calc(100vw-4rem)] px-1 py-1">
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <strong className="text-sm leading-tight text-slate-950">
+                  {selectedAed.name}
+                </strong>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${statusClasses(selectedAed.status.key)}`}
+                >
+                  {selectedAed.status.label}
+                </span>
+              </div>
+
+              <dl className="space-y-1.5 text-xs text-slate-700">
+                {(selectedAed.address || selectedAed.city) && (
+                  <div>
+                    <dt className="font-semibold text-slate-500">Adres</dt>
+                    <dd>{selectedAed.address ?? selectedAed.city}</dd>
+                  </div>
+                )}
+                {selectedAed.location_detail && (
+                  <div>
+                    <dt className="font-semibold text-slate-500">Lokalizacja</dt>
+                    <dd>{selectedAed.location_detail}</dd>
+                  </div>
+                )}
+                {selectedAed.gmina_name && (
+                  <div>
+                    <dt className="font-semibold text-slate-500">Gmina</dt>
+                    <dd>{selectedAed.gmina_name}</dd>
+                  </div>
+                )}
+                <div>
+                  <dt className="font-semibold text-slate-500">Godziny dostępności</dt>
+                  <dd>{formatOpeningHours(selectedAed)}</dd>
+                </div>
+                {selectedAed.operator && (
+                  <div>
+                    <dt className="font-semibold text-slate-500">Operator</dt>
+                    <dd>{selectedAed.operator}</dd>
+                  </div>
+                )}
+                {selectedAed.access_note && (
+                  <div>
+                    <dt className="font-semibold text-slate-500">Dostęp</dt>
+                    <dd>{selectedAed.access_note}</dd>
+                  </div>
+                )}
+                {selectedAed.locked && (
+                  <div className="rounded-md bg-amber-50 px-2 py-1 text-amber-800">
+                    Urządzenie może być zabezpieczone / zamknięte
+                  </div>
+                )}
+                {selectedAed.source && (
+                  <div className="pt-1 text-[10px] text-slate-400">
+                    Źródło: {selectedAed.source}
+                  </div>
+                )}
+              </dl>
+            </div>
+          </Popup>
+        )}
+
         <NavigationControl position="top-right" showCompass={false} />
 
         {hoveredArea && (
@@ -407,6 +703,21 @@ const PolandCommunesMap = forwardRef<
           className="pointer-events-none absolute inset-x-0 top-4 mx-auto w-fit rounded-xl border border-amber-200 bg-white/95 px-4 py-2 text-sm text-amber-800 shadow-md"
         >
           Brak danych o defibrylatorach w bazie.
+        </div>
+      )}
+
+      {zoom >= 9 && aedLoadError && (
+        <div
+          role="alert"
+          className="pointer-events-none absolute inset-x-0 top-16 mx-auto w-fit rounded-xl border border-red-200 bg-white/95 px-4 py-2 text-sm text-red-800 shadow-md"
+        >
+          Nie udało się wczytać pinezek: {aedLoadError}
+        </div>
+      )}
+
+      {zoom >= 9 && aedLoadError === null && (
+        <div className="pointer-events-none absolute right-4 top-16 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-md">
+          Pinezki: {aedItems.length}
         </div>
       )}
 
