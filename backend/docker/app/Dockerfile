@@ -77,6 +77,7 @@ RUN chmod +x /usr/local/bin/start-celery-local
 
 # TODO: limit the context here to only the required paths
 ADD . /usr/src/mcod_backend
+RUN mkdir -p /usr/src/mcod_backend/logs
 
 # Compile translations and cleanup pyc files afterwards
 RUN python manage.py compilemessages --settings mcod.settings.test -v 3
