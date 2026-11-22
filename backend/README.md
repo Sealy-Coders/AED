@@ -113,6 +113,18 @@ Wyedytuj plik `/etc/hosts`, tak by nazwy serwisów mcod rozwiązywały się na a
 ```
 
 **Uwaga dla MacOS**: zamień adres `172.18.18.100` na `127.0.0.1`.
+
+**Konflikt podsieci**: sieć `backend` w `docker-compose.yml` ma stałą podsieć `172.18.18.0/24` i stałe adresy usług.
+Jeśli nachodzi ona na inną sieć Dockera lub sieć lokalną/VPN (`docker compose up` kończy się błędem
+`Pool overlaps with other one on this address space`), ustaw w `.env` inne trzy pierwsze oktety, np.:
+
+```dotenv
+MCOD_DOCKER_NETWORK_PREFIX=172.29.18
+```
+
+Adresy w `/etc/hosts` i w zmiennych `MCOD_NGINX_*` (w `env.sample` zapisane jako `${MCOD_DOCKER_NETWORK_PREFIX}`)
+zmieniają się wtedy odpowiednio, np. `mcod-nginx` → `172.29.18.100`. Istniejącą sieć trzeba utworzyć od nowa:
+`docker compose down` (bez `-v`, wolumeny z danymi zostają) i ponowne `docker compose up`.
 Docker na MacOS nie działa natywnie i adresy wewnętrzne z sieci dockerowych nie są osiągalne z poziomu hosta.
 
 ## Uruchomienie środowiska lokalnego w docker-compose
@@ -160,14 +172,19 @@ mcod-elasticsearch.
 ### Konfiguracja nginx
 
 Nginx wymaga zmiennych środowiskowych MCOD_NGINX\_\* wskazujących na usługi w dockerze.
+
+Porty na hoście ustawiają `MCOD_NGINX_HTTP_PORT` (domyślnie `80`) i `MCOD_NGINX_HTTPS_PORT` (domyślnie `443`), np. gdy port 80
+jest zajęty: `MCOD_NGINX_HTTP_PORT=8080`. Port 80 obsługuje tylko domyślny `404` (i forum po HTTP), usługi działają na HTTPS.
+Przy zmianie portu HTTPS trzeba go dopisać do adresów (`BASE_URL`, `API_URL`, … oraz `target` w proxy frontendu),
+np. `https://api.mcod.local:8443`.
 Ustaw je w `.env`:
 
 ```dotenv
-MCOD_NGINX_WS=http://172.18.18.104:8001
-MCOD_NGINX_PN_APPS=http://172.18.18.101:8001
-MCOD_NGINX_API=http://172.18.18.102:8000
-MCOD_NGINX_ADMIN=http://172.18.18.101:8001
-MCOD_NGINX_CMS=http://172.18.18.103:8002
+MCOD_NGINX_WS=http://${MCOD_DOCKER_NETWORK_PREFIX}.104:8001
+MCOD_NGINX_PN_APPS=http://${MCOD_DOCKER_NETWORK_PREFIX}.101:8001
+MCOD_NGINX_API=http://${MCOD_DOCKER_NETWORK_PREFIX}.102:8000
+MCOD_NGINX_ADMIN=http://${MCOD_DOCKER_NETWORK_PREFIX}.101:8001
+MCOD_NGINX_CMS=http://${MCOD_DOCKER_NETWORK_PREFIX}.103:8002
 ```
 
 Adresy odpowiadają adresom usług w `docker-compose.local.yml`.
@@ -543,6 +560,51 @@ aż po instalację motywu i synchronizację użytkowników.
 
 Po wykonaniu powyższej komendy utworzy się plik `mcod/api_key.txt`. Zawartość pliku należy przekopiować i wkleić do
 zmiennej `DISCOURSE_API_KEY` w pliku `.env`
+
+## Mapa defibrylatorów AED (`mcod.aed`)
+
+Aplikacja `mcod.aed` przechowuje lokalizacje defibrylatorów AED (tabela `aed_device` w Postgresie)
+i udostępnia je w API dla podstrony frontendu `/pl/aed`.
+
+### Ładowanie danych
+
+Komenda `seed_aed` scrapuje dane z dane.gov.pl i OpenAEDMap/OpenStreetMap, waliduje je
+(współrzędne w granicach Polski), deduplikuje (scalanie punktów w promieniu 15 m + deterministyczne `id`
+z współrzędnych), przypisuje kod TERYT gminy (punkt w poligonie, `data/aed/gminy.json`) i zapisuje
+w bazie. Ponowne uruchomienie jest idempotentne (aktualizuje istniejące wiersze, usuwa nieaktualne).
+
+```shell
+# tabela aed_device (init_mcod_db wykonuje ją razem z pozostałymi migracjami; dla istniejącej bazy:)
+docker compose -f docker-compose.local.yml run mcod-local-run python manage.py migrate aed
+
+# załadowanie zapisanego zrzutu (bez sieci)
+docker compose -f docker-compose.local.yml run mcod-local-run python manage.py seed_aed --input data/aed/aed_scraped.json
+
+# scraping na żywo (zapisuje surowy wynik do data/aed/aed_scraped.json)
+docker compose -f docker-compose.local.yml run mcod-local-run python manage.py seed_aed
+
+# opcje: --dry-run (bez zapisu), --keep-stale (nie usuwaj starych wierszy), --gminy <plik GeoJSON>
+```
+
+Ścieżki można zmienić zmiennymi `AED_GMINY_GEOJSON_PATH` i `AED_SCRAPE_OUTPUT_PATH`.
+
+### Endpointy API
+
+Zwracają zwykły JSON (nie JSON:API) i działają z prefiksem wersji (`/1.4/aed/...`) oraz bez niego:
+
+- `GET /aed/frequencies` — liczba AED per województwo / powiat / gmina (klucze TERYT), `total`, `unassigned`
+- `GET /aed?bbox=min_lon,min_lat,max_lon,max_lat&only_open_now=false` — punkty AED z bieżącym statusem
+  dostępności (strefa czasowa Europe/Warsaw); błędny `bbox` → `400`
+- `GET /aed/{id}` — pojedynczy AED; brak → `404`
+
+Przy niedostępnej bazie danych endpointy zwracają `503`.
+
+### Testy
+
+```shell
+docker compose -f docker-compose.local.yml run mcod-local-tests mcod/aed/tests --no-cov
+docker compose -f docker-compose.local.yml run mcod-local-tests-api mcod/aed/tests/test_api.py --no-cov
+```
 
 ## Dalsza konfiguracja środowiska
 

@@ -160,6 +160,7 @@ INSTALLED_APPS = [
     "mcod.showcases",
     "mcod.submissions",
     "mcod.logingovpl",
+    "mcod.aed",
 ]
 
 CMS_MIDDLEWARE = ["mcod.cms.middleware.CounterMiddleware"] if COMPONENT == "cms" else []
@@ -1943,6 +1944,10 @@ GEOCODER_URL = env("GEOCODER_URL", default="http://geocoder.mcod.local")
 GEOCODER_USER = env("GEOCODER_USER", default="geouser")
 GEOCODER_PASS = env("GEOCODER_PASS", default="1234")
 PLACEHOLDER_URL = env("PLACEHOLDER_URL", default="http://placeholder.mcod.local")
+
+# AED map (mcod.aed): gminy polygons for the TERYT lookup and the default scraper output
+AED_GMINY_GEOJSON_PATH = env("AED_GMINY_GEOJSON_PATH", default=str(DATA_DIR.path("aed", "gminy.json")))
+AED_SCRAPE_OUTPUT_PATH = env("AED_SCRAPE_OUTPUT_PATH", default=str(DATA_DIR.path("aed", "aed_scraped.json")))
 
 MAX_TAG_LENGTH = 100
 

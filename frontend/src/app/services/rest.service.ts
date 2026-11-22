@@ -51,6 +51,8 @@ export abstract class RestService {
     ApiConfig.confirmSubscribeNewsletter,
     // likes errors (e.g. 409 already liked) are handled by the favourites logic (FavouriteErrorHandler)
     ApiConfig.likeManagement,
+    // the AED map shows its own inline error state (pages/aed-map)
+    ApiConfig.aed,
   ];
   /**
    * Cookie domain

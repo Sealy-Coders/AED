@@ -85,6 +85,11 @@ const routes: Routes = [
         loadChildren: () => import('./pages/broken-links/broken-links.routes').then((mod) => mod.BROKEN_LINKS_ROUTES),
       },
       {
+        path: '!aed',
+        data: { breadcrumbs: { translationKey: 'AedMap.Title' } },
+        loadChildren: () => import('./pages/aed-map/aed-map.routes').then((mod) => mod.AED_MAP_ROUTES),
+      },
+      {
         path: '!user',
         loadChildren: () => import('./user/user.module').then((m) => m.UserModule),
       },

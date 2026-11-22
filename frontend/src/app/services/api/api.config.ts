@@ -1,5 +1,7 @@
 export enum ApiConfig {
   apiVersion = '/1.4',
+  aed = '/aed',
+  aedFrequencies = '/aed/frequencies',
   userLogin = '/auth/login',
   userLogout = '/auth/logout',
   userRegistration = '/auth/registration',

@@ -960,6 +960,89 @@
     "CloseMap": "Close map",
     "RefreshMap": "Refresh map"
   },
+  "AedMap": {
+    "Title": "AED defibrillator map",
+    "Description": "Voivodeships → counties → communes. The colour of an area depends on the number of defibrillators; zoom in to see individual devices with their availability hours.",
+    "Sources": "Data sources: dane.gov.pl and OpenAEDMap / OpenStreetMap. Device locations are aggregated automatically and may be incomplete.",
+    "MapLabel": "Map of AED defibrillators in Poland",
+    "Loading": "Loading defibrillator data…",
+    "LoadError": "Could not load the data",
+    "Retry": "Try again",
+    "Empty": "There is no defibrillator data in the database.",
+    "PinsError": "Could not load the pins",
+    "Pins": "Pins",
+    "Legend": "Defibrillators",
+    "Total": "total",
+    "Defibrillators": "Defibrillators",
+    "Voivodeship": "voivodeship",
+    "VoivodeshipShort": "voiv.",
+    "ShowAed": "Show defibrillator details: {name}",
+    "ZoomToGroup": "Zoom in to {name}: {count} defibrillators",
+    "Levels": {
+      "voivodeship": "voivodeship",
+      "county": "county",
+      "commune": "commune"
+    },
+    "Errors": {
+      "NoConnection": "no connection to the API server",
+      "DatabaseUnavailable": "the database is unavailable",
+      "Server": "server error ({status})",
+      "Unknown": "unknown error",
+      "MapUnavailable": "The map cannot be displayed",
+      "WebglUnavailable": "Your browser does not provide WebGL 2, which the map requires. Turn on hardware acceleration (e.g. Chrome: Settings → System → “Use graphics acceleration”, Firefox: Settings → Performance) and reload the page, or use another browser.",
+      "MapInit": "The map could not be started. See the browser console for details."
+    },
+    "Status": {
+      "open_24_7": "Open 24/7",
+      "open_now": "Open now",
+      "closed_now": "Closed now",
+      "unknown": "Unknown status"
+    },
+    "Popup": {
+      "Address": "Address",
+      "Location": "Location",
+      "Commune": "Commune",
+      "OpeningHours": "Availability hours",
+      "Operator": "Operator",
+      "Access": "Access",
+      "Source": "Source",
+      "Locked": "The device may be secured / locked",
+      "AlwaysOpen": "Around the clock (24/7)",
+      "UnknownHours": "Hours unknown"
+    },
+    "Days": {
+      "0": "Mon",
+      "1": "Tue",
+      "2": "Wed",
+      "3": "Thu",
+      "4": "Fri",
+      "5": "Sat",
+      "6": "Sun"
+    },
+    "Location": {
+      "MyLocation": "My location",
+      "Locating": "Locating…",
+      "ShowMyCommune": "Show my commune",
+      "Stop": "Stop location tracking",
+      "YouAreIn": "You are in",
+      "DefibrillatorsInCommune": "Defibrillators in the commune",
+      "OutsidePoland": "Your location is outside Poland.",
+      "YourLocation": "Your location",
+      "YourLocationAccuracy": "Your location (accuracy ±{accuracy} m)",
+      "PermissionDenied": "Location access was denied",
+      "Timeout": "Timed out waiting for the location",
+      "Unavailable": "Could not determine the location",
+      "Unsupported": "This browser does not support geolocation",
+      "InsecureContext": "Location requires an HTTPS connection (or localhost)"
+    },
+    "Search": {
+      "Label": "Search for a place",
+      "Placeholder": "E.g. Gdańsk",
+      "Loading": "Loading places…",
+      "LoadError": "Could not load the list of places.",
+      "NoResults": "No results."
+    }
+  },
   "Menu": {
     "Self": "Menu",
     "Main": "Main menu",
@@ -979,7 +1062,8 @@
     "Regulations": "Regulations",
     "Showcases": "PoCoTo",
     "DGAInformationPoint": "DGA Information Point",
-    "More": "More"
+    "More": "More",
+    "Aed": "AED defibrillators"
   },
   "MyDashboard": {
     "Self": "My dashboard",

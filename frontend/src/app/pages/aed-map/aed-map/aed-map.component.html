@@ -1,0 +1,174 @@
+<div class="aed-map">
+  <div #mapContainer class="aed-map__canvas" role="region" [attr.aria-label]="'AedMap.MapLabel' | translate"></div>
+
+  @if (mapErrorKey(); as errorKey) {
+    <div role="alert" class="aed-map__fatal">
+      <strong>{{ 'AedMap.Errors.MapUnavailable' | translate }}</strong>
+      <span>{{ errorKey | translate }}</span>
+    </div>
+  }
+
+  <!-- data state -->
+  @switch (loadState().status) {
+    @case ('loading') {
+      <div role="status" class="aed-map__banner">{{ 'AedMap.Loading' | translate }}</div>
+    }
+    @case ('error') {
+      @if (loadState(); as state) {
+        @if (state.status === 'error') {
+          <div role="alert" class="aed-map__banner aed-map__banner--error">
+            <span>{{ 'AedMap.LoadError' | translate }}: {{ state.messageKey | translate: state.params }}</span>
+            <button type="button" class="btn btn-sm btn-danger" (click)="retry()">
+              {{ 'AedMap.Retry' | translate }}
+            </button>
+          </div>
+        }
+      }
+    }
+    @case ('ready') {
+      @if (loadState(); as state) {
+        @if (state.status === 'ready' && state.total === 0) {
+          <div role="status" class="aed-map__banner aed-map__banner--warning">{{ 'AedMap.Empty' | translate }}</div>
+        }
+      }
+    }
+  }
+
+  @if (level() === 'commune' && aedLoadErrorKey(); as errorKey) {
+    <div role="alert" class="aed-map__banner aed-map__banner--error aed-map__banner--second">
+      {{ 'AedMap.PinsError' | translate }}: {{ errorKey | translate }}
+    </div>
+  }
+
+  <!-- location panel + legend -->
+  <div class="aed-map__overlay">
+    @if (geoState().status === 'active' && userGmina(); as gmina) {
+      <div role="status" class="aed-map__chip aed-map__chip--info">
+        {{ 'AedMap.Location.YouAreIn' | translate }} <strong>{{ gmina.name }}</strong>
+        @if (userGminaCount() !== null) {
+          <span class="d-block text-muted">
+            {{ 'AedMap.Location.DefibrillatorsInCommune' | translate }}: {{ userGminaCount() }}
+          </span>
+        }
+      </div>
+    }
+    @if (geoState().status === 'active' && userGmina() === null) {
+      <div role="status" class="aed-map__chip aed-map__chip--warning">
+        {{ 'AedMap.Location.OutsidePoland' | translate }}
+      </div>
+    }
+    @if (geoState(); as state) {
+      @if (state.status === 'error') {
+        <div role="alert" class="aed-map__chip aed-map__chip--error">{{ state.messageKey | translate }}</div>
+      }
+    }
+
+    <div class="aed-map__controls">
+      <button type="button" class="aed-map__button" [disabled]="geoState().status === 'locating'" (click)="locate()">
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="aed-map__locate-icon"
+          [ngClass]="{
+            'aed-map__locate-icon--active': geoState().status === 'active',
+            'aed-map__locate-icon--pending': geoState().status === 'locating',
+          }"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round">
+          <circle cx="12" cy="12" r="7" />
+          <circle cx="12" cy="12" r="2.5" fill="currentColor" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+        </svg>
+        @switch (geoState().status) {
+          @case ('locating') {
+            {{ 'AedMap.Location.Locating' | translate }}
+          }
+          @case ('active') {
+            {{ 'AedMap.Location.ShowMyCommune' | translate }}
+          }
+          @default {
+            {{ 'AedMap.Location.MyLocation' | translate }}
+          }
+        }
+      </button>
+      @if (geoState().status === 'active') {
+        <button
+          type="button"
+          class="aed-map__button aed-map__button--icon"
+          [attr.aria-label]="'AedMap.Location.Stop' | translate"
+          [title]="'AedMap.Location.Stop' | translate"
+          (click)="hideUserLocation()">
+          ×
+        </button>
+      }
+    </div>
+
+    <div class="aed-map__legend">
+      <p class="aed-map__legend-title">
+        {{ 'AedMap.Legend' | translate }} - {{ 'AedMap.Levels.' + level() | translate }}
+        @if (loadState(); as state) {
+          @if (state.status === 'ready' && state.total > 0) {
+            <span class="aed-map__legend-total"
+              >({{ 'AedMap.Total' | translate }} {{ state.total.toLocaleString('pl-PL') }})</span
+            >
+          }
+        }
+      </p>
+      <div class="aed-map__legend-scale" aria-hidden="true">
+        @for (color of redColors; track color) {
+          <span [style.background-color]="color"></span>
+        }
+      </div>
+    </div>
+  </div>
+
+  @if (level() === 'commune' && !aedLoadErrorKey()) {
+    <div class="aed-map__pins-count">{{ 'AedMap.Pins' | translate }}: {{ aedItems().length }}</div>
+  }
+
+  <!-- AED detail: rendered by Angular, shown inside a MapLibre popup -->
+  <div class="d-none">
+    <div #aedPopupContent class="aed-map__detail">
+      @if (selectedAed(); as aed) {
+        <div class="aed-map__detail-header">
+          <strong>{{ aed.name }}</strong>
+          <span class="aed-status" [ngClass]="statusClass(aed.status.key)">
+            {{ 'AedMap.Status.' + aed.status.key | translate }}
+          </span>
+        </div>
+        <dl class="aed-map__detail-list">
+          @if (aed.address || aed.city) {
+            <dt>{{ 'AedMap.Popup.Address' | translate }}</dt>
+            <dd>{{ aed.address ?? aed.city }}</dd>
+          }
+          @if (aed.location_detail) {
+            <dt>{{ 'AedMap.Popup.Location' | translate }}</dt>
+            <dd>{{ aed.location_detail }}</dd>
+          }
+          @if (aed.gmina_name) {
+            <dt>{{ 'AedMap.Popup.Commune' | translate }}</dt>
+            <dd>{{ aed.gmina_name }}</dd>
+          }
+          <dt>{{ 'AedMap.Popup.OpeningHours' | translate }}</dt>
+          <dd>{{ openingHours(aed) }}</dd>
+          @if (aed.operator) {
+            <dt>{{ 'AedMap.Popup.Operator' | translate }}</dt>
+            <dd>{{ aed.operator }}</dd>
+          }
+          @if (aed.access_note) {
+            <dt>{{ 'AedMap.Popup.Access' | translate }}</dt>
+            <dd>{{ aed.access_note }}</dd>
+          }
+        </dl>
+        @if (aed.locked) {
+          <p class="aed-map__detail-warning">{{ 'AedMap.Popup.Locked' | translate }}</p>
+        }
+        @if (aed.source) {
+          <p class="aed-map__detail-source">{{ 'AedMap.Popup.Source' | translate }}: {{ aed.source }}</p>
+        }
+      }
+    </div>
+  </div>
+</div>

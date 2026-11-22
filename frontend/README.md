@@ -157,6 +157,21 @@ networks:
 The network name, port, and the addresses need to be coordinated with backend's `docker-compose.yml` and nginx config.
 Warning: this configuration *requires* the backend network.
 
+## Mapa defibrylatorów AED (`/pl/aed`, `/en/aed`)
+
+Podstrona `src/app/pages/aed-map` (leniwie ładowana trasa `!aed`, link „Defibrylatory AED” w menu):
+
+- mapa [MapLibre GL](https://maplibre.org/) (`maplibre-gl` przypięte do `5.11.0` — nowsze wersje zawierają
+  literały BigInt, których nie obsługuje cel kompilacji z `.browserslistrc`), podkład OpenFreeMap,
+- kolorowanie województw → powiatów → gmin wg liczby AED (`GET /aed/frequencies`),
+- pinezki AED (`GET /aed?bbox=…`) od przybliżenia gmin, wcześniej zgrupowane per województwo / powiat,
+- szczegóły urządzenia ze statusem „otwarte teraz”, wyszukiwarka miejscowości,
+- lokalizacja użytkownika (Geolocation API, wymaga HTTPS lub `localhost`) z przybliżeniem do jego gminy.
+
+Granice gmin: `src/assets/geojson/gminy.json`; województwa i powiaty są pobierane z
+`raw.githubusercontent.com/waszkiewiczja/GeoJSON-Polska-Wojewodztwa-Powiaty-Gminy`.
+Dane AED dostarcza backendowa aplikacja `mcod.aed` (zob. `backend/README.md`).
+
 ## CI/CD — zmienne konfigurowalne w jobach
 
 Poniższe zmienne można ustawić ręcznie przy uruchamianiu pipeline'u w GitLabie

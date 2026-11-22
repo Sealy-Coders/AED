@@ -14,7 +14,7 @@ services:
       - .env
     networks:
       backend:
-        ipv4_address: 172.18.18.18
+        ipv4_address: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.18
     ports:
       - "5432:5432"
 
@@ -34,7 +34,7 @@ services:
       - "15692:15692"
     networks:
       backend:
-        ipv4_address: 172.18.18.19
+        ipv4_address: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.19
 
   mcod-flower:
     image: mher/flower
@@ -60,7 +60,7 @@ services:
       - "6379:6379"
     networks:
       backend:
-        ipv4_address: 172.18.18.20
+        ipv4_address: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.20
 
   mcod-elasticsearch:
     image: elasticsearch:6.8.23-mcod-1
@@ -85,7 +85,7 @@ services:
       - "9200:9200"
     networks:
       backend:
-        ipv4_address: 172.18.18.21
+        ipv4_address: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.21
 
   mcod-smtp:
     container_name: mcod-smtp
@@ -96,7 +96,7 @@ services:
       - "1025:1025"
     networks:
       backend:
-        ipv4_address: 172.18.18.22
+        ipv4_address: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.22
     healthcheck:
       test: "echo HELO | nc 127.0.0.1 1025"
 
@@ -117,7 +117,7 @@ services:
       - fuseki_vol_6:/var/lib/fuseki
     networks:
       backend:
-        ipv4_address: 172.18.18.23
+        ipv4_address: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.23
 
   mcod-nginx:
     container_name: mcod-nginx
@@ -132,13 +132,14 @@ services:
       - ./statics:/usr/share/nginx/html/statics
       - ./media:/usr/share/nginx/html/media
     ports:
-      - "80:80"
-      - "443:443"
+      # host ports - override MCOD_NGINX_HTTP_PORT / MCOD_NGINX_HTTPS_PORT in .env when 80/443 are taken
+      - "${MCOD_NGINX_HTTP_PORT:-80}:80"
+      - "${MCOD_NGINX_HTTPS_PORT:-443}:443"
     env_file:
       - .env
     networks:
       backend:
-        ipv4_address: 172.18.18.100
+        ipv4_address: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.100
         aliases:
           # see *_URL environment variables and server_name directives in config files
           - mcod.local
@@ -176,7 +177,7 @@ services:
       DISCOURSE_PASSWORD: ${DISCOURSE_PASSWORD}
     networks:
       backend:
-        ipv4_address: 172.18.18.140
+        ipv4_address: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.140
     healthcheck:
       test: "curl -f -s -o /dev/null -w '%{http_code}' http://localhost:3000/"
 
@@ -195,7 +196,7 @@ services:
       DISCOURSE_PORT: "3000"
     networks:
       backend:
-        ipv4_address: 172.18.18.141
+        ipv4_address: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.141
     healthcheck:
       test: "curl -f -s -o /dev/null -w '%{http_code}' http://localhost:3000/"
 
@@ -207,7 +208,9 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 172.18.18.0/24
+        # Override MCOD_DOCKER_NETWORK_PREFIX in .env when 172.18.18.0/24 overlaps
+        # another Docker network or a local/VPN network (see README).
+        - subnet: ${MCOD_DOCKER_NETWORK_PREFIX:-172.18.18}.0/24
 
 volumes:
   postgres_vol_17:

@@ -1,0 +1,13 @@
+<section class="vertical-spacing aed-map-page">
+  <div class="container">
+    <h1 class="heading heading--md">{{ 'AedMap.Title' | translate }}</h1>
+    <p class="aed-map-page__lead">{{ 'AedMap.Description' | translate }}</p>
+
+    <div class="aed-map-page__grid">
+      <app-aed-map></app-aed-map>
+      <app-aed-city-search (citySelected)="onCitySelected($event)"></app-aed-city-search>
+    </div>
+
+    <p class="aed-map-page__sources">{{ 'AedMap.Sources' | translate }}</p>
+  </div>
+</section>

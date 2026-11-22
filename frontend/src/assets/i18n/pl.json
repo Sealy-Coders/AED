@@ -960,6 +960,89 @@
     "CloseMap": "Zamknij mapę",
     "RefreshMap": "Odśwież mapę"
   },
+  "AedMap": {
+    "Title": "Mapa defibrylatorów AED",
+    "Description": "Województwa → powiaty → gminy. Kolor obszaru zależy od liczby defibrylatorów, a po przybliżeniu widać pojedyncze urządzenia wraz z godzinami dostępności.",
+    "Sources": "Źródła danych: dane.gov.pl oraz OpenAEDMap / OpenStreetMap. Lokalizacje urządzeń są agregowane automatycznie i mogą być niekompletne.",
+    "MapLabel": "Mapa defibrylatorów AED w Polsce",
+    "Loading": "Wczytywanie danych o defibrylatorach…",
+    "LoadError": "Nie udało się wczytać danych",
+    "Retry": "Spróbuj ponownie",
+    "Empty": "Brak danych o defibrylatorach w bazie.",
+    "PinsError": "Nie udało się wczytać pinezek",
+    "Pins": "Pinezki",
+    "Legend": "Defibrylatory",
+    "Total": "łącznie",
+    "Defibrillators": "Defibrylatory",
+    "Voivodeship": "województwo",
+    "VoivodeshipShort": "woj.",
+    "ShowAed": "Pokaż dane defibrylatora: {name}",
+    "ZoomToGroup": "Powiększ {name}: {count} defibrylatorów",
+    "Levels": {
+      "voivodeship": "województwo",
+      "county": "powiat",
+      "commune": "gmina"
+    },
+    "Errors": {
+      "NoConnection": "brak połączenia z serwerem API",
+      "DatabaseUnavailable": "baza danych jest niedostępna",
+      "Server": "błąd serwera ({status})",
+      "Unknown": "nieznany błąd",
+      "MapUnavailable": "Nie można wyświetlić mapy",
+      "WebglUnavailable": "Przeglądarka nie udostępnia WebGL 2, którego wymaga mapa. Włącz akcelerację sprzętową (np. Chrome: Ustawienia → System → „Używaj akceleracji grafiki”, Firefox: Ustawienia → Wydajność) i odśwież stronę albo użyj innej przeglądarki.",
+      "MapInit": "Nie udało się uruchomić mapy. Szczegóły w konsoli przeglądarki."
+    },
+    "Status": {
+      "open_24_7": "Czynne 24/7",
+      "open_now": "Otwarte teraz",
+      "closed_now": "Zamknięte teraz",
+      "unknown": "Nieznany status"
+    },
+    "Popup": {
+      "Address": "Adres",
+      "Location": "Lokalizacja",
+      "Commune": "Gmina",
+      "OpeningHours": "Godziny dostępności",
+      "Operator": "Operator",
+      "Access": "Dostęp",
+      "Source": "Źródło",
+      "Locked": "Urządzenie może być zabezpieczone / zamknięte",
+      "AlwaysOpen": "Całodobowo (24/7)",
+      "UnknownHours": "Godziny nieznane"
+    },
+    "Days": {
+      "0": "pon.",
+      "1": "wt.",
+      "2": "śr.",
+      "3": "czw.",
+      "4": "pt.",
+      "5": "sob.",
+      "6": "niedz."
+    },
+    "Location": {
+      "MyLocation": "Moja lokalizacja",
+      "Locating": "Ustalanie lokalizacji…",
+      "ShowMyCommune": "Pokaż moją gminę",
+      "Stop": "Wyłącz śledzenie lokalizacji",
+      "YouAreIn": "Jesteś w gminie",
+      "DefibrillatorsInCommune": "Defibrylatory w gminie",
+      "OutsidePoland": "Twoja lokalizacja jest poza granicami Polski.",
+      "YourLocation": "Twoja lokalizacja",
+      "YourLocationAccuracy": "Twoja lokalizacja (dokładność ±{accuracy} m)",
+      "PermissionDenied": "Brak zgody na udostępnienie lokalizacji",
+      "Timeout": "Przekroczono czas oczekiwania na lokalizację",
+      "Unavailable": "Nie udało się ustalić lokalizacji",
+      "Unsupported": "Przeglądarka nie obsługuje geolokalizacji",
+      "InsecureContext": "Lokalizacja wymaga połączenia HTTPS (lub localhost)"
+    },
+    "Search": {
+      "Label": "Wyszukaj miejscowość",
+      "Placeholder": "Np. Gdańsk",
+      "Loading": "Ładowanie miejscowości…",
+      "LoadError": "Nie udało się wczytać listy miejscowości.",
+      "NoResults": "Brak wyników."
+    }
+  },
   "Menu": {
     "Self": "Menu",
     "Main": "Menu główne",
@@ -979,7 +1062,8 @@
     "Regulations": "Regulamin",
     "Showcases": "PoCoTo",
     "DGAInformationPoint": "Punkt informacyjny DGA",
-    "More": "Więcej"
+    "More": "Więcej",
+    "Aed": "Defibrylatory AED"
   },
   "MyDashboard": {
     "Self": "Mój pulpit",
