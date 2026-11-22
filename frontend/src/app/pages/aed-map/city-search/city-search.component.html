@@ -1,0 +1,34 @@
+<aside class="aed-city-search">
+  <label for="aed-city-search" class="aed-city-search__label">{{ 'AedMap.Search.Label' | translate }}</label>
+  <input
+    id="aed-city-search"
+    type="search"
+    class="form-control aed-city-search__input"
+    autocomplete="off"
+    [placeholder]="'AedMap.Search.Placeholder' | translate"
+    [ngModel]="query()"
+    (ngModelChange)="query.set($event)" />
+
+  <div class="aed-city-search__results" aria-live="polite">
+    @if (loading()) {
+      <p class="aed-city-search__info">{{ 'AedMap.Search.Loading' | translate }}</p>
+    } @else if (loadFailed()) {
+      <p class="aed-city-search__info text-danger">{{ 'AedMap.Search.LoadError' | translate }}</p>
+    } @else if (query().trim() && suggestions().length === 0) {
+      <p class="aed-city-search__info">{{ 'AedMap.Search.NoResults' | translate }}</p>
+    } @else {
+      <ul class="list-unstyled mb-0">
+        @for (city of suggestions(); track city.code) {
+          <li>
+            <button type="button" class="aed-city-search__item" (click)="select(city)">
+              <span class="aed-city-search__name">{{ city.name }}</span>
+              <span class="aed-city-search__voivodeship"
+                >{{ 'AedMap.VoivodeshipShort' | translate }} {{ city.voivodeship }}</span
+              >
+            </button>
+          </li>
+        }
+      </ul>
+    }
+  </div>
+</aside>

@@ -1,0 +1,64 @@
+@use 'base/variables' as *;
+
+.aed-city-search {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 240px;
+  padding: 1rem;
+  border: 1px solid #dee2e6;
+  border-radius: 0.75rem;
+  background: $color-white;
+
+  &__label {
+    margin-bottom: 0.5rem;
+    color: $color-heading;
+    font-weight: 600;
+  }
+
+  &__results {
+    flex: 1;
+    min-height: 0;
+    margin-top: 0.75rem;
+    overflow-y: auto;
+  }
+
+  &__info {
+    margin: 0;
+    padding: 0.75rem 0;
+    color: $color-text;
+    font-size: 0.875rem;
+  }
+
+  &__item {
+    display: block;
+    width: 100%;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+    background: transparent;
+    text-align: left;
+
+    &:hover {
+      border-color: rgba($color-blue-light, 0.25);
+      background: $color-hover;
+    }
+
+    &:focus-visible {
+      outline: $outline;
+      outline-offset: 1px;
+    }
+  }
+
+  &__name {
+    display: block;
+    color: $color-heading;
+    font-weight: 600;
+  }
+
+  &__voivodeship {
+    display: block;
+    color: $color-grey-dark;
+    font-size: 0.75rem;
+  }
+}
