@@ -3,7 +3,7 @@
 **Projekt:** Misja AED - Dane na ratunek 
 
 
-<p align="center"><img src="logov3.png" alt="Logotyp akcji Otwarte AED" width="150"></p>
+<p align="center"><img src="logotyp.png" alt="Logotyp akcji Otwarte AED" width="150"></p>
 
 ## 1. Opis koncepcji i budowa znaku
 
@@ -26,7 +26,7 @@ Znak składa się z trzech kolorów podstawowych oraz wycięcia (kanału alfa / 
 ## 3. Pole ochronne
 
 Za jednostkę konstrukcyjną (**moduł bazowy X**) przyjmuje się szerokość podstawy pinezki w miejscu jej styku z zielonym dyskiem (1/6 całkowitej szerokości zielonej podstawy). Wokół sygnetu wyznaczono pole ochronne wynoszące minimum **2X** z każdej ze stron (góra, dół, lewo, prawo), w którym nie mogą pojawiać się żadne inne elementy graficzne, teksty ani krawędzie formatu.
-<p align="center"><img src="/image.png" alt="Logotyp akcji Otwarte AED" width="600"></p>
+<p align="center"><img src="image.png"  width="600"></p>
 
 ## 4. Minimalna wielkość reprodukcji
 
