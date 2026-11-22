@@ -1,0 +1,25 @@
+@use 'base/variables' as *;
+
+.aed-map-page {
+  &__lead {
+    margin-bottom: 1.25rem;
+    color: $color-text;
+  }
+
+  &__grid {
+    display: grid;
+    gap: 1rem;
+    min-height: 520px;
+
+    @media (min-width: 992px) {
+      grid-template-columns: minmax(0, 1fr) 320px;
+      height: min(75vh, 720px);
+    }
+  }
+
+  &__sources {
+    margin: 1rem 0 0;
+    color: $color-grey-dark;
+    font-size: 0.8125rem;
+  }
+}

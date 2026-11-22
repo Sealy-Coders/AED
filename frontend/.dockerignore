@@ -1,13 +1,14 @@
-node_modules
-.next
-out
-coverage
-*.tsbuildinfo
-next-env.d.ts
-npm-debug.log*
-.DS_Store
-# Local env files must not leak into the image (NEXT_PUBLIC_API_URL is a build arg)
-.env*
-!.env.example
-Dockerfile
+.idea/
 .dockerignore
+Dockerfile
+db.sqlite3
+#docker/
+coverage/
+.cache
+.gitlab-ci.yml
+*.log
+.git
+temp/
+
+*.pid
+node_modules/

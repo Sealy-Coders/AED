@@ -1,9 +1,0 @@
-# Used by BuildKit for backend/Dockerfile (build context = repository root).
-# Whitelist only what the image needs.
-*
-!backend/requirements.txt
-!backend/app/
-!backend/seed_db.py
-!frontend/public/geojson/gminy.json
-**/__pycache__
-**/*.py[cod]
